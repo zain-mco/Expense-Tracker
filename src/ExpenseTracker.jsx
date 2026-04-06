@@ -1,49 +1,31 @@
 import { useState, useEffect } from 'react';
 import ExpenseForm from './ExpenseForm';
 import ExpenseList from './ExpenseList';
+import { supabase } from './supabase';
 
 function ExpenseTracker({ onLogout }) {
   const [expenses, setExpenses] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Determine API URL based on environment and current hostname so phone access works natively
-  const getApiUrl = () => {
-    if (import.meta.env.DEV) {
-      return `http://${window.location.hostname}/Expense Tracker/api.php`;
-    }
-    // In production (served from XAMPP), assume api.php is in the same directory
-    const pathname = window.location.pathname;
-    const base = pathname.substring(0, pathname.lastIndexOf('/'));
-    return `${window.location.origin}${base}/api.php`;
-  };
-
-  const API_URL = getApiUrl();
-
   useEffect(() => {
-    // Fetch data from API on mount
-    fetch(API_URL)
-      .then(res => res.json())
-      .then(data => {
-        if (Array.isArray(data)) {
-          // Auto-prune by 1 year logic
-          const oneYearAgo = new Date();
-          oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-          
-          let loaded = data.filter(exp => {
-            const d = new Date(exp.date || parseInt(exp.id));
-            return d >= oneYearAgo;
-          });
-          setExpenses(loaded);
-        }
-        setIsLoading(false);
-      })
-      .catch(err => {
-        console.error("Failed to fetch expenses:", err);
-        setIsLoading(false);
-      });
+    fetchExpenses();
   }, []);
 
-  const handleAddExpense = (expense) => {
+  const fetchExpenses = async () => {
+    const { data, error } = await supabase
+      .from('expenses')
+      .select('*')
+      .order('date', { ascending: false });
+    
+    if (error) {
+      console.error("Failed to fetch expenses:", error);
+    } else {
+      setExpenses(data || []);
+    }
+    setIsLoading(false);
+  };
+
+  const handleAddExpense = async (expense) => {
     const newExpense = {
       id: Date.now().toString(),
       ...expense
@@ -53,29 +35,30 @@ function ExpenseTracker({ onLogout }) {
     setExpenses([newExpense, ...expenses]);
 
     // Send to database
-    fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(newExpense)
-    }).catch(err => {
-      console.error("Failed to save expense:", err);
+    const { error } = await supabase
+      .from('expenses')
+      .insert([newExpense]);
+
+    if (error) {
+      console.error("Failed to save expense:", error);
       // Optional: rollback on error
-    });
+    }
   };
 
-  const handleDeleteExpense = (id) => {
+  const handleDeleteExpense = async (id) => {
     // Optimistic UI update
     setExpenses(expenses.filter(e => e.id !== id));
 
     // Delete from database
-    fetch(`${API_URL}?id=${id}`, {
-      method: 'DELETE'
-    }).catch(err => {
-      console.error("Failed to delete expense:", err);
+    const { error } = await supabase
+      .from('expenses')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.error("Failed to delete expense:", error);
       // Optional: rollback on error
-    });
+    }
   };
 
   const totalSpent = expenses.reduce((acc, curr) => acc + Number(curr.amount), 0);
