@@ -3,28 +3,45 @@ import ExpenseForm from './ExpenseForm';
 import ExpenseList from './ExpenseList';
 
 function ExpenseTracker({ onLogout }) {
-  const [expenses, setExpenses] = useState(() => {
-    const saved = localStorage.getItem('expenses_data');
-    let loaded = [];
-    if (saved) {
-      try { loaded = JSON.parse(saved); } catch (e) { loaded = []; }
-    }
-    
-    // Auto-pruning logic: retain only 1 year of data
-    const oneYearAgo = new Date();
-    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-    
-    loaded = loaded.filter(exp => {
-      const d = new Date(exp.date || parseInt(exp.id));
-      return d >= oneYearAgo;
-    });
+  const [expenses, setExpenses] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-    return loaded;
-  });
+  // Determine API URL based on environment and current hostname so phone access works natively
+  const getApiUrl = () => {
+    if (import.meta.env.DEV) {
+      return `http://${window.location.hostname}/Expense Tracker/api.php`;
+    }
+    // In production (served from XAMPP), assume api.php is in the same directory
+    const pathname = window.location.pathname;
+    const base = pathname.substring(0, pathname.lastIndexOf('/'));
+    return `${window.location.origin}${base}/api.php`;
+  };
+
+  const API_URL = getApiUrl();
 
   useEffect(() => {
-    localStorage.setItem('expenses_data', JSON.stringify(expenses));
-  }, [expenses]);
+    // Fetch data from API on mount
+    fetch(API_URL)
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          // Auto-prune by 1 year logic
+          const oneYearAgo = new Date();
+          oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+          
+          let loaded = data.filter(exp => {
+            const d = new Date(exp.date || parseInt(exp.id));
+            return d >= oneYearAgo;
+          });
+          setExpenses(loaded);
+        }
+        setIsLoading(false);
+      })
+      .catch(err => {
+        console.error("Failed to fetch expenses:", err);
+        setIsLoading(false);
+      });
+  }, []);
 
   const handleAddExpense = (expense) => {
     const newExpense = {
@@ -32,12 +49,33 @@ function ExpenseTracker({ onLogout }) {
       ...expense
     };
     
-    // In case the user edits to an old date, make sure we still sort nicely or push it in front.
+    // Optimistic UI update
     setExpenses([newExpense, ...expenses]);
+
+    // Send to database
+    fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(newExpense)
+    }).catch(err => {
+      console.error("Failed to save expense:", err);
+      // Optional: rollback on error
+    });
   };
 
   const handleDeleteExpense = (id) => {
+    // Optimistic UI update
     setExpenses(expenses.filter(e => e.id !== id));
+
+    // Delete from database
+    fetch(`${API_URL}?id=${id}`, {
+      method: 'DELETE'
+    }).catch(err => {
+      console.error("Failed to delete expense:", err);
+      // Optional: rollback on error
+    });
   };
 
   const totalSpent = expenses.reduce((acc, curr) => acc + Number(curr.amount), 0);
