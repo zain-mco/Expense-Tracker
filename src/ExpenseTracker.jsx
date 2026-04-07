@@ -20,7 +20,12 @@ function ExpenseTracker({ onLogout }) {
     if (error) {
       console.error("Failed to fetch expenses:", error);
     } else {
-      setExpenses(data || []);
+      // Map 'title' from database back to 'description' which the UI expects
+      const mappedData = (data || []).map(exp => ({
+        ...exp,
+        description: exp.title
+      }));
+      setExpenses(mappedData);
     }
     setIsLoading(false);
   };
@@ -34,10 +39,17 @@ function ExpenseTracker({ onLogout }) {
     // Optimistic UI update
     setExpenses([newExpense, ...expenses]);
 
-    // Send to database
+    // Send to database mapping 'description' -> 'title'
+    const dbExpense = {
+      id: newExpense.id,
+      title: newExpense.description,
+      amount: newExpense.amount,
+      date: newExpense.date
+    };
+
     const { error } = await supabase
       .from('expenses')
-      .insert([newExpense]);
+      .insert([dbExpense]);
 
     if (error) {
       console.error("Failed to save expense:", error);
